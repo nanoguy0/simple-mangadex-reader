@@ -1,0 +1,1 @@
+A dirt simple mangadex reader. Using a CORS proxy, runs completely out of your browser.

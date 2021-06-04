@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Mangadex Reader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <style>
+		html,
+		body {
+			margin: 0;
+			padding: 0;
+		}
+
+		body {
+			background: #000;
+			height: 100%;
+			width: 100%;
+		}
+		body > img {
+			max-width: 100%;
+			display: block;
+			margin: 3px auto;
+		}
+
+</style>
+<script
+  src="https://code.jquery.com/jquery-3.6.0.min.js"
+  integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+  crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-autocomplete/1.0.7/jquery.auto-complete.min.js" integrity="sha512-TToQDr91fBeG4RE5RjMl/tqNAo35hSRR4cbIFasiV2AAMQ6yKXXYhdSdEpUcRE6bqsTiB+FPLPls4ZAFMoK5WA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery-autocomplete/1.0.7/jquery.auto-complete.css" integrity="sha512-uq8QcHBpT8VQcWfwrVcH/n/B6ELDwKAdX4S/I3rYSwYldLVTs7iII2p6ieGCM13QTPEKZvItaNKBin9/3cjPAg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+	</head>
+
+	
+  <body class="reader">
+	
+    </div>
+  </body>
+	<input id="manga-search" placeholder="Enter manga name" autocomplete="off" style="display: none; width:100%;max-width:600px;outline:0;position: fixed;left: 50%;transform: translate(-50%, 0);"></input>
+	<div id="controls" style="position: fixed;left: 50%;transform: translate(-50%, 0);">
+	<button id="prev">Back</button>
+	<select id="chapters" onchange="chapterChange();" ></select>
+	<button id="next">Next</button>
+	</div>
+	
+	    <script>
+		const makeCORSRequest = (href) => fetch('https://api.allorigins.win/raw?url='+ encodeURIComponent(href));
+const _getManga = async (id, offset = 0) => await (await makeCORSRequest(`https://api.mangadex.org/chapter?manga=${id}&limit=100&translatedLanguage[]=en&order[chapter]=asc&offset=${offset * 100}`)).json();
+
+const _getBaseURL = async (chapter) => (await (await makeCORSRequest(`https://api.mangadex.org/at-home/server/${chapter.data.id}`)).json()).baseUrl;
+const _constructURL = (baseUrl, quality, hash, image) => `${baseUrl}/${quality}/${hash}/${image}`;
+const _constructReport = (url, req) => ({url, success: req.ok, bytes: Number(req.headers.get("content-length")), duration: 235, cached: req.headers.get('X-Cache')?.startsWith('HIT') ? true : false});
+const _sendReport = (url, req) => fetch('https://api.mangadex.network/report', {method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(_constructReport(url, req))});
+
+async function getManga(id) {
+	var result = await _getManga(id), requestCount = Math.floor(result.total/100);
+	if (requestCount > 0) for (let i = 1; requestCount - i != -1; i++) result.results = [...result.results, ...(await _getManga(id, i)).results];
+	
+	result.results = result.results.filter((d, i)=> result.results.findIndex(s => s.data.attributes.chapter == d.data.attributes.chapter) == i);
+	for (let chapter of result.results) {
+		let chapterOption = document.createElement('option');
+		chapterOption.value = JSON.stringify(chapter);
+		chapterOption.textContent = `${chapter.data.attributes.chapter} ${chapter.data.attributes.title}`;
+		document.getElementById('chapters').appendChild(chapterOption);
+	}
+	
+	
+	return result.results;
+}
+
+async function getChapter(chapter) {
+	var imageServer = await _getBaseURL(chapter), imageLinks = [];
+	if (chapter.data.attributes.data) {
+		// Use data server
+		for (let image of chapter.data.attributes.data) imageLinks.push(_constructURL(imageServer,'data', chapter.data.attributes.hash, image));
+	} else if (chapter.data.attributes.dataSaver) {
+		// Use datasaver server
+		for (let image of chapter.data.attributes.dataSaver) imageLinks.push(_constructURL(imageServer,'data-saver', chapter.data.attributes.hash, image));
+	}
+
+ for (let image of imageLinks) {
+		let imageRef = await makeCORSRequest(image);
+		if (!imageServer.startsWith('https://uploads.mangadex.org')) await _sendReport(image, imageRef); // Send report to mangadex
+		let imageElm = document.createElement('img');
+		imageElm.src = (window.URL || window.webkitURL).createObjectURL(await imageRef.blob());
+		document.body.appendChild(imageElm);
+ }
+}
+
+async function chapterChange() {
+	var images = document.getElementsByTagName('img');
+	var l = images.length;
+	for (var i = 0; i < l; i++) {
+			images[0].parentNode.removeChild(images[0]);
+	}
+	let chapter = JSON.parse(document.querySelector('option:checked').value);
+	await getChapter(chapter);
+}
+
+$("#next").click(function() {
+  var nextElement = $('#chapters > option:selected').next('option');
+  if (nextElement.length > 0) {
+    $('#chapters > option:selected').removeAttr('selected').next('option').attr('selected', 'selected');
+		chapterChange();
+  }
+});
+
+$("#prev").click(function() {
+  var nextElement = $('#chapters > option:selected').prev('option');
+  if (nextElement.length > 0) {
+    $('#chapters > option:selected').removeAttr('selected').prev('option').attr('selected', 'selected');
+		chapterChange();
+  }
+});
+
+(async function init() {
+var mangaId = (new URLSearchParams(window.location.search)).get('id');
+if (!mangaId) {
+	$('#manga-search').css('display', '');
+	$('#controls').css('display', 'none');
+
+	var xhr;
+	await new Promise(resolve => {
+		$('#manga-search').autoComplete({
+			source: (term, response) => {
+				$.getJSON('https://api.allorigins.win/raw?url='+ encodeURIComponent(`https://api.mangadex.org/manga?limit=3&title=${term}`), (data) => {
+					response(data.results.map(d=>({title: d.data.attributes.title.en, id:d.data.id})))
+				});
+			},
+			renderItem: function (item, search){
+        search = search.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        var re = new RegExp("(" + search.split(' ').join('|') + ")", "gi");
+        return '<div class="autocomplete-suggestion" data-mangaid="'+item.id+'" data-title="'+item.title+'" data-val="'+search+'">'+item.title.replace(re, "<b>$1</b>")+'</div>';
+    },
+    onSelect: function(e, term, item){
+        mangaId = item.data('mangaid');
+				resolve();
+    }
+		})
+	})
+	
+	$('#manga-search').css('display', 'none');
+	$('#controls').css('display', '');
+}
+	getManga(mangaId);
+})();
+
+
+</script>
+</html>
